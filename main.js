@@ -9,11 +9,11 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
 scene.fog = new THREE.Fog(0x87ceeb, 20, 80);
 
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.05, 1000);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75)); // performans için sınırlı
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.25 : 2)); // performans için sınırlı
 document.body.appendChild(renderer.domElement);
 
 window.addEventListener("resize", () => {
@@ -295,32 +295,57 @@ function setActiveWeaponModel(name) {
 }
 
 // Ateş anında geri tepme + namlu alevi + mermi izi
+// Performans için nesneler baştan oluşturulup HAVUZDAN yeniden kullanılıyor,
+// her ateşte yeni nesne yaratıp çöpe atmıyoruz (mobilde donmayı önler).
 let recoilTimer = 0;
-const muzzleFlashes = [];
-const tracers = [];
+
+const FLASH_POOL_SIZE = 6;
+const flashPool = [];
+for (let i = 0; i < FLASH_POOL_SIZE; i++) {
+  const mat = new THREE.SpriteMaterial({ color: 0xffdd55, transparent: true, opacity: 0 });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(0.15, 0.15, 0.15);
+  sprite.visible = false;
+  scene.add(sprite);
+  flashPool.push({ sprite, life: 0 });
+}
+
+const TRACER_POOL_SIZE = 10;
+const tracerPool = [];
+for (let i = 0; i < TRACER_POOL_SIZE; i++) {
+  const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+  const mat = new THREE.LineBasicMaterial({ color: 0xfff2a8, transparent: true, opacity: 0 });
+  const line = new THREE.Line(geo, mat);
+  line.visible = false;
+  line.frustumCulled = false;
+  scene.add(line);
+  tracerPool.push({ line, life: 0 });
+}
 
 function triggerRecoil() {
   recoilTimer = 0.09;
 }
 
+const _flashTip = new THREE.Vector3();
 function spawnMuzzleFlash() {
-  const flashMat = new THREE.SpriteMaterial({ color: 0xffdd55, transparent: true, opacity: 1 });
-  const sprite = new THREE.Sprite(flashMat);
-  sprite.scale.set(0.15, 0.15, 0.15);
-  const model = weaponModels[currentWeapon];
-  const tip = new THREE.Vector3(0.22, -0.15, -0.75);
-  camera.localToWorld(tip);
-  sprite.position.copy(tip);
-  scene.add(sprite);
-  muzzleFlashes.push({ sprite, life: 0.06 });
+  const slot = flashPool.find((f) => f.life <= 0) || flashPool[0];
+  _flashTip.set(0.22, -0.15, -0.75);
+  camera.localToWorld(_flashTip);
+  slot.sprite.position.copy(_flashTip);
+  slot.sprite.material.opacity = 1;
+  slot.sprite.visible = true;
+  slot.life = 0.06;
 }
 
 function spawnTracer(from, to) {
-  const geo = new THREE.BufferGeometry().setFromPoints([from, to]);
-  const mat = new THREE.LineBasicMaterial({ color: 0xfff2a8, transparent: true, opacity: 0.9 });
-  const line = new THREE.Line(geo, mat);
-  scene.add(line);
-  tracers.push({ line, life: 0.08 });
+  const slot = tracerPool.find((t) => t.life <= 0) || tracerPool[0];
+  const positions = slot.line.geometry.attributes.position;
+  positions.setXYZ(0, from.x, from.y, from.z);
+  positions.setXYZ(1, to.x, to.y, to.z);
+  positions.needsUpdate = true;
+  slot.line.material.opacity = 0.9;
+  slot.line.visible = true;
+  slot.life = 0.08;
 }
 
 function updateTransientEffects(delta) {
@@ -329,23 +354,17 @@ function updateTransientEffects(delta) {
   const model = weaponModels[currentWeapon];
   if (model) model.position.z = -0.4 + kick;
 
-  for (let i = muzzleFlashes.length - 1; i >= 0; i--) {
-    const f = muzzleFlashes[i];
+  for (const f of flashPool) {
+    if (f.life <= 0) continue;
     f.life -= delta;
     f.sprite.material.opacity = Math.max(0, f.life / 0.06);
-    if (f.life <= 0) {
-      scene.remove(f.sprite);
-      muzzleFlashes.splice(i, 1);
-    }
+    if (f.life <= 0) f.sprite.visible = false;
   }
-  for (let i = tracers.length - 1; i >= 0; i--) {
-    const t = tracers[i];
+  for (const t of tracerPool) {
+    if (t.life <= 0) continue;
     t.life -= delta;
-    t.line.material.opacity = Math.max(0, t.life / 0.08);
-    if (t.life <= 0) {
-      scene.remove(t.line);
-      tracers.splice(i, 1);
-    }
+    t.line.material.opacity = Math.max(0, (t.life / 0.08) * 0.9);
+    if (t.life <= 0) t.line.visible = false;
   }
 }
 
@@ -475,6 +494,7 @@ let myTeam = "blue";
 let health = 100;
 let alive = true;
 let gameStarted = false;
+let lastScoreboardUpdate = 0;
 
 function connect() {
   const url =
@@ -495,11 +515,15 @@ function connect() {
     }
 
     if (msg.type === "state") {
-      const scoreList = document.getElementById("scoreList");
-      scoreList.innerHTML = "";
+      const now = performance.now();
+      const shouldUpdateScoreboard = now - lastScoreboardUpdate > 500; // saniyede 2 kez yeterli
+      let scoreHTML = "";
+
       for (const [id, p] of Object.entries(msg.players)) {
-        const cls = p.team === "blue" ? "teamBlue" : "teamRed";
-        scoreList.innerHTML += `<div class="${cls}">${p.name}: ${p.kills} / ${p.deaths}</div>`;
+        if (shouldUpdateScoreboard) {
+          const cls = p.team === "blue" ? "teamBlue" : "teamRed";
+          scoreHTML += `<div class="${cls}">${p.name}: ${p.kills} / ${p.deaths}</div>`;
+        }
         if (id === myId) continue;
 
         if (!otherPlayers.has(id)) {
@@ -516,6 +540,11 @@ function connect() {
         op.targetPos = p.position;
         op.targetRotY = p.rotationY;
         op.mesh.visible = p.alive;
+      }
+
+      if (shouldUpdateScoreboard) {
+        document.getElementById("scoreList").innerHTML = scoreHTML;
+        lastScoreboardUpdate = now;
       }
     }
 
@@ -623,17 +652,18 @@ function tryShoot() {
   let closestId = null;
   let closestDist = Infinity;
   let closestPoint = null;
+  const _hitPoint = new THREE.Vector3();
 
   for (const [id, op] of otherPlayers) {
     if (!op.mesh.visible) continue;
-    const box = new THREE.Box3().setFromObject(op.mesh);
-    const hit = raycaster.ray.intersectBox(box, new THREE.Vector3());
+    _reusableBox.setFromObject(op.mesh);
+    const hit = raycaster.ray.intersectBox(_reusableBox, _hitPoint);
     if (hit) {
       const dist = camera.position.distanceTo(hit);
       if (dist < w.range && dist < closestDist) {
         closestDist = dist;
         closestId = id;
-        closestPoint = hit;
+        closestPoint = hit.clone();
       }
     }
   }
@@ -674,6 +704,11 @@ fireBtn.addEventListener("pointercancel", () => (firing = false));
 let lastNetworkSend = 0;
 const NETWORK_SEND_INTERVAL = 1 / 20; // saniyede 20 kez yeterli
 
+// Her karede yeni nesne yaratmamak için tekrar kullanılan vektörler
+const _moveDir = new THREE.Vector3();
+const _moveRight = new THREE.Vector3();
+const _reusableBox = new THREE.Box3();
+
 // ---------- Oyun döngüsü ----------
 const clock = new THREE.Clock();
 
@@ -706,14 +741,13 @@ function animate() {
     const baseSpeed = running ? RUN_SPEED : WALK_SPEED;
     const speed = baseSpeed * delta * speedScale;
 
-    const dir = new THREE.Vector3();
-    camera.getWorldDirection(dir);
-    dir.y = 0;
-    dir.normalize();
-    const right = new THREE.Vector3().crossVectors(dir, camera.up).normalize();
+    camera.getWorldDirection(_moveDir);
+    _moveDir.y = 0;
+    _moveDir.normalize();
+    _moveRight.crossVectors(_moveDir, camera.up).normalize();
 
-    player3D.position.addScaledVector(dir, forward * speed);
-    player3D.position.addScaledVector(right, strafe * speed);
+    player3D.position.addScaledVector(_moveDir, forward * speed);
+    player3D.position.addScaledVector(_moveRight, strafe * speed);
 
     if (keys["Space"] && onGround) {
       velocityY = JUMP_FORCE;
