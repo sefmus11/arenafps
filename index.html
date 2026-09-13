@@ -31,7 +31,7 @@
   .weaponBtn {
     width:52px; height:52px; border-radius:10px; background:rgba(0,0,0,0.55);
     border:2px solid rgba(255,255,255,0.3); color:#fff; font-size:22px;
-    display:flex; align-items:center; justify-content:center; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; cursor:pointer; touch-action:none;
   }
   .weaponBtn.active { border-color:#f1c40f; }
 
@@ -63,8 +63,8 @@
 
   /* ---- Mobil kontroller ---- */
   #mobileControls { display:none; position:fixed; inset:0; z-index:8; }
-  #joystickZone { position:absolute; left:0; bottom:0; width:50%; height:60%; pointer-events:auto; }
-  #lookZone { position:absolute; right:0; bottom:0; width:50%; height:100%; pointer-events:auto; }
+  #joystickZone { position:absolute; left:0; top:0; bottom:190px; width:50%; pointer-events:auto; touch-action:none; }
+  #lookZone { position:absolute; right:0; top:0; bottom:190px; width:50%; pointer-events:auto; touch-action:none; }
   #joystickBase {
     position:absolute; width:110px; height:110px; border-radius:50%;
     background:rgba(255,255,255,0.15); border:2px solid rgba(255,255,255,0.3);
@@ -77,17 +77,17 @@
   #fireBtn {
     position:absolute; right:26px; bottom:150px; width:80px; height:80px; border-radius:50%;
     background:rgba(231,76,60,0.55); border:2px solid rgba(255,255,255,0.4);
-    display:flex; align-items:center; justify-content:center; font-size:28px; pointer-events:auto;
+    display:flex; align-items:center; justify-content:center; font-size:28px; pointer-events:auto; touch-action:none;
   }
   #reloadBtn {
     position:absolute; right:120px; bottom:170px; width:56px; height:56px; border-radius:50%;
     background:rgba(0,0,0,0.5); border:2px solid rgba(255,255,255,0.4); color:#fff;
-    display:flex; align-items:center; justify-content:center; font-size:20px; pointer-events:auto;
+    display:flex; align-items:center; justify-content:center; font-size:20px; pointer-events:auto; touch-action:none;
   }
   #runBtn {
     position:absolute; left:26px; top:26px; width:56px; height:56px; border-radius:50%;
     background:rgba(0,0,0,0.5); border:2px solid rgba(255,255,255,0.4); color:#fff;
-    display:flex; align-items:center; justify-content:center; font-size:22px; pointer-events:auto;
+    display:flex; align-items:center; justify-content:center; font-size:22px; pointer-events:auto; touch-action:none;
   }
   #runBtn.active { background:rgba(46,204,113,0.6); }
 </style>
