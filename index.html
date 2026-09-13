@@ -15,6 +15,7 @@
   }
   #health { position:absolute; bottom:20px; left:20px; font-size:26px; font-weight:bold; text-shadow: 0 0 4px #000; }
   #ammo { position:absolute; bottom:20px; right:20px; font-size:26px; font-weight:bold; text-shadow: 0 0 4px #000; }
+  #currentWeaponLabel { position:absolute; bottom:52px; right:20px; font-size:14px; opacity:0.8; text-shadow: 0 0 4px #000; }
   #killfeed { position:absolute; top:20px; right:20px; text-align:right; font-size:13px; }
   #killfeed div { background:rgba(0,0,0,0.55); padding:4px 8px; margin-bottom:4px; border-radius:4px; }
   #scoreboard {
@@ -23,17 +24,6 @@
   }
   .teamBlue { color:#5dade2; }
   .teamRed { color:#e74c3c; }
-
-  #weaponBar {
-    position:absolute; bottom:80px; left:50%; transform:translateX(-50%);
-    display:flex; gap:8px; pointer-events:auto; z-index:9;
-  }
-  .weaponBtn {
-    width:52px; height:52px; border-radius:10px; background:rgba(0,0,0,0.55);
-    border:2px solid rgba(255,255,255,0.3); color:#fff; font-size:22px;
-    display:flex; align-items:center; justify-content:center; cursor:pointer; touch-action:none;
-  }
-  .weaponBtn.active { border-color:#f1c40f; }
 
   #startScreen {
     position:fixed; inset:0; background:rgba(0,0,0,0.92); color:#fff;
@@ -65,15 +55,17 @@
   #mobileControls { display:none; position:fixed; inset:0; z-index:8; }
   #joystickZone { position:absolute; left:0; top:0; bottom:190px; width:50%; pointer-events:auto; touch-action:none; }
   #lookZone { position:absolute; right:0; top:0; bottom:190px; width:50%; pointer-events:auto; touch-action:none; }
+
+  /* Joystick artık HER ZAMAN aynı yerde sabit ve görünür */
   #joystickBase {
-    position:absolute; width:110px; height:110px; border-radius:50%;
-    background:rgba(255,255,255,0.15); border:2px solid rgba(255,255,255,0.3);
-    display:none;
+    position:absolute; left:40px; bottom:40px; width:110px; height:110px; border-radius:50%;
+    background:rgba(255,255,255,0.18); border:2px solid rgba(255,255,255,0.35);
   }
   #joystickKnob {
     position:absolute; width:50px; height:50px; border-radius:50%;
-    background:rgba(255,255,255,0.5); top:30px; left:30px;
+    background:rgba(255,255,255,0.55); top:30px; left:30px;
   }
+
   #fireBtn {
     position:absolute; right:26px; bottom:150px; width:80px; height:80px; border-radius:50%;
     background:rgba(231,76,60,0.55); border:2px solid rgba(255,255,255,0.4);
@@ -90,6 +82,23 @@
     display:flex; align-items:center; justify-content:center; font-size:22px; pointer-events:auto; touch-action:none;
   }
   #runBtn.active { background:rgba(46,204,113,0.6); }
+
+  /* Basılı tutunca açılan silah seçme menüsü */
+  #weaponSelectBtn {
+    position:absolute; right:120px; bottom:80px; width:60px; height:60px; border-radius:50%;
+    background:rgba(0,0,0,0.55); border:2px solid rgba(255,255,255,0.45); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-size:22px; pointer-events:auto; touch-action:none;
+  }
+  #weaponPopup {
+    position:absolute; right:90px; bottom:150px; display:none; flex-direction:column; gap:6px;
+  }
+  .weaponOption {
+    width:64px; height:56px; border-radius:10px; background:rgba(0,0,0,0.8);
+    border:2px solid rgba(255,255,255,0.35); color:#fff; font-size:13px; font-weight:bold;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; pointer-events:auto;
+  }
+  .weaponOption .icon { font-size:20px; }
+  .weaponOption.hover { border-color:#f1c40f; background:rgba(90,65,0,0.9); transform:scale(1.08); }
 </style>
 </head>
 <body>
@@ -102,8 +111,8 @@
   </div>
   <button id="playBtn">OYNA</button>
   <p style="max-width:320px">
-    Bilgisayar: WASD hareket, fare bak, sol tık ateş, Shift koş, R doldur, 1/2/3 silah değiştir<br/>
-    Mobil: sol taraf joystick, sağ taraf bakış, alt sağ ateş butonu
+    Bilgisayar: WASD hareket, fare bak, sol tık ateş, Shift koş, R doldur, 1/2/3/4 silah değiştir<br/>
+    Mobil: sol taraf joystick, sağ taraf bakış, alt sağ ateş, silah ikonunu basılı tutup seç
   </p>
 </div>
 <div id="deathScreen">ÖLDÜN<br/><span style="font-size:18px">Yeniden doğuyorsun...</span></div>
@@ -112,13 +121,9 @@
   <div id="crosshair"></div>
   <div id="health">❤️ 100</div>
   <div id="ammo">🔫 12/12</div>
+  <div id="currentWeaponLabel">Tabanca</div>
   <div id="killfeed"></div>
   <div id="scoreboard"><b>Skor Tablosu</b><div id="scoreList"></div></div>
-  <div id="weaponBar">
-    <div class="weaponBtn" data-weapon="knife">🔪</div>
-    <div class="weaponBtn active" data-weapon="pistol">🔫</div>
-    <div class="weaponBtn" data-weapon="rifle">💥</div>
-  </div>
 </div>
 
 <div id="mobileControls">
@@ -129,13 +134,16 @@
   <div id="runBtn">🏃</div>
   <div id="reloadBtn">🔄</div>
   <div id="fireBtn">🔥</div>
+  <div id="weaponSelectBtn">🔫</div>
+  <div id="weaponPopup">
+    <div class="weaponOption" data-weapon="ak47"><span class="icon">🪖</span>AK47</div>
+    <div class="weaponOption" data-weapon="m4"><span class="icon">🎯</span>M4</div>
+    <div class="weaponOption" data-weapon="pistol"><span class="icon">🔫</span>Tabanca</div>
+    <div class="weaponOption" data-weapon="knife"><span class="icon">🔪</span>Bıçak</div>
+  </div>
 </div>
 
 <script>
-  // Backend WebSocket adresi. Netlify'de siteyi yayınladıktan sonra,
-  // oyun sunucusunu (server.js) Railway'de barındırıp buraya adresini yaz.
-  // Boş bırakırsan (aynı sunucuda test ediyorsan) otomatik olarak
-  // sitenin kendi adresine bağlanmayı dener.
   window.GAME_SERVER_URL = "wss://arena-fps-server-production.up.railway.app";
 </script>
 <script type="importmap">
