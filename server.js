@@ -19,8 +19,10 @@ const MAX_HEALTH = 100;
 const WEAPON_DAMAGE = {
   knife: 75,
   pistol: 20,
-  rifle: 16,
+  m4: 18,
+  ak47: 22,
 };
+const VALID_WEAPONS = ["knife", "pistol", "m4", "ak47"];
 
 const players = new Map();
 let nextId = 1;
@@ -84,7 +86,7 @@ wss.on("connection", (ws) => {
       }
     }
 
-    if (msg.type === "weapon" && ["knife", "pistol", "rifle"].includes(msg.weapon)) {
+    if (msg.type === "weapon" && VALID_WEAPONS.includes(msg.weapon)) {
       player.weapon = msg.weapon;
     }
 
@@ -93,7 +95,7 @@ wss.on("connection", (ws) => {
       if (!target || !target.alive || msg.targetId === id) return;
       if (target.team === player.team) return; // dostluk ateşi yok
 
-      const weapon = ["knife", "pistol", "rifle"].includes(msg.weapon) ? msg.weapon : "pistol";
+      const weapon = VALID_WEAPONS.includes(msg.weapon) ? msg.weapon : "pistol";
       const damage = WEAPON_DAMAGE[weapon];
       target.health -= damage;
 
