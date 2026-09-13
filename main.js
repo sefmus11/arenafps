@@ -6,8 +6,25 @@ document.getElementById("mobileControls").style.display = isMobile ? "block" : "
 
 // ---------- Sahne kurulumu ----------
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87ceeb);
-scene.fog = new THREE.Fog(0x87ceeb, 20, 80);
+
+// Basit gökyüzü geçişi (düz renk yerine, ucuz ve etkili)
+function makeSkyTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 2;
+  canvas.height = 256;
+  const ctx = canvas.getContext("2d");
+  const grad = ctx.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, "#4a90d9");
+  grad.addColorStop(0.5, "#87ceeb");
+  grad.addColorStop(1, "#cfe9f7");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 2, 256);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+scene.background = makeSkyTexture();
+scene.fog = new THREE.Fog(0x9fd3ee, 22, 85);
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.05, 1000);
 
@@ -22,21 +39,66 @@ window.addEventListener("resize", () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.2));
-const sun = new THREE.DirectionalLight(0xffffff, 1);
+scene.add(new THREE.HemisphereLight(0xbfd9ff, 0x445533, 1.15));
+const sun = new THREE.DirectionalLight(0xfff4e0, 1.1);
 sun.position.set(30, 40, 20);
 scene.add(sun);
+
+// ---------- Doku üreten yardımcı fonksiyon (kod ile üretilen basit dokular) ----------
+function makeTiledTexture(draw, repeat) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 128;
+  canvas.height = 128;
+  draw(canvas.getContext("2d"), canvas.width, canvas.height);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(repeat, repeat);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+const grassTexture = makeTiledTexture((ctx, w, h) => {
+  ctx.fillStyle = "#5c8a4f";
+  ctx.fillRect(0, 0, w, h);
+  for (let i = 0; i < 260; i++) {
+    const shade = Math.random() < 0.5 ? "#527d46" : "#6a9a5a";
+    ctx.fillStyle = shade;
+    const x = Math.random() * w, y = Math.random() * h;
+    ctx.fillRect(x, y, 2 + Math.random() * 3, 2 + Math.random() * 3);
+  }
+}, 16);
+
+const wallTexture = makeTiledTexture((ctx, w, h) => {
+  ctx.fillStyle = "#6b6b6b";
+  ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = "#4d4d4d";
+  ctx.lineWidth = 2;
+  for (let y = 0; y < h; y += 16) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
+    ctx.stroke();
+  }
+  for (let y = 0; y < h; y += 32) {
+    for (let x = (y % 32 === 0 ? 0 : 16); x < w; x += 32) {
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x, y + 16);
+      ctx.stroke();
+    }
+  }
+}, 4);
 
 // ---------- Harita ----------
 const MAP_SIZE = 48;
 const ground = new THREE.Mesh(
   new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE),
-  new THREE.MeshStandardMaterial({ color: 0x557a4c })
+  new THREE.MeshStandardMaterial({ map: grassTexture, roughness: 1 })
 );
 ground.rotation.x = -Math.PI / 2;
 scene.add(ground);
 
-const wallMat = new THREE.MeshStandardMaterial({ color: 0x555555 });
+const wallMat = new THREE.MeshStandardMaterial({ map: wallTexture, roughness: 0.9 });
 function addWall(x, z, w, d) {
   const wall = new THREE.Mesh(new THREE.BoxGeometry(w, 6, d), wallMat);
   wall.position.set(x, 3, z);
@@ -47,15 +109,24 @@ addWall(0, MAP_SIZE / 2, MAP_SIZE, 1);
 addWall(-MAP_SIZE / 2, 0, 1, MAP_SIZE);
 addWall(MAP_SIZE / 2, 0, 1, MAP_SIZE);
 
-const coverMat = new THREE.MeshStandardMaterial({ color: 0x8b5a2b });
+// Siperler artık tek tip kahverengi değil, çeşitli renk/malzemede
+const coverPalette = [
+  { color: 0x8b5a2b, roughness: 0.85 }, // ahşap kasa
+  { color: 0x707070, roughness: 0.6 },  // beton blok
+  { color: 0x9c7a4a, roughness: 0.9 },  // açık ahşap
+  { color: 0x556b6b, roughness: 0.7 },  // metal konteyner tonu
+];
 for (let i = 0; i < 16; i++) {
   const size = 2 + Math.random() * 2;
-  const box = new THREE.Mesh(new THREE.BoxGeometry(size, size, size), coverMat);
+  const palette = coverPalette[Math.floor(Math.random() * coverPalette.length)];
+  const mat = new THREE.MeshStandardMaterial({ color: palette.color, roughness: palette.roughness });
+  const box = new THREE.Mesh(new THREE.BoxGeometry(size, size, size), mat);
   box.position.set(
     (Math.random() * 2 - 1) * (MAP_SIZE / 2 - 4),
     size / 2,
     (Math.random() * 2 - 1) * (MAP_SIZE / 2 - 4)
   );
+  box.rotation.y = Math.random() * Math.PI;
   scene.add(box);
 }
 
@@ -206,29 +277,44 @@ const weaponModels = {}; // weapon adı -> THREE.Group
 
 function buildKnife() {
   const g = new THREE.Group();
-  const blade = new THREE.Mesh(
-    new THREE.BoxGeometry(0.05, 0.35, 0.03),
-    new THREE.MeshStandardMaterial({ color: 0xd0d0d0, metalness: 0.7, roughness: 0.3 })
-  );
-  blade.position.set(0, 0.2, 0);
-  const handle = new THREE.Mesh(
-    new THREE.BoxGeometry(0.06, 0.15, 0.06),
-    new THREE.MeshStandardMaterial({ color: 0x3b2a1a })
-  );
-  handle.position.set(0, 0, 0);
-  g.add(blade, handle);
+  const bladeMat = new THREE.MeshStandardMaterial({ color: 0xd8d8d8, metalness: 0.85, roughness: 0.2 });
+  const handleMat = new THREE.MeshStandardMaterial({ color: 0x3b2a1a, roughness: 0.8 });
+  const guardMat = new THREE.MeshStandardMaterial({ color: 0x555555, metalness: 0.6, roughness: 0.4 });
+
+  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.32, 0.028), bladeMat);
+  blade.position.set(0, 0.24, 0);
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.06, 4), bladeMat);
+  tip.position.set(0, 0.41, 0);
+  tip.rotation.y = Math.PI / 4;
+  const guard = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.02, 0.05), guardMat);
+  guard.position.set(0, 0.07, 0);
+  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, 0.16, 8), handleMat);
+  handle.position.set(0, -0.03, 0);
+
+  g.add(blade, tip, guard, handle);
   return g;
 }
 
 function buildPistol() {
   const g = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({ color: 0x2b2b2b, metalness: 0.5, roughness: 0.5 });
-  const slide = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.32), mat);
-  slide.position.set(0, 0.06, -0.05);
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.2, 0.09), mat);
-  grip.position.set(0, -0.08, 0.08);
-  grip.rotation.x = 0.25;
-  g.add(slide, grip);
+  const mat = new THREE.MeshStandardMaterial({ color: 0x2b2b2b, metalness: 0.6, roughness: 0.4 });
+  const accentMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, metalness: 0.3, roughness: 0.6 });
+
+  const slide = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.075, 0.32), mat);
+  slide.position.set(0, 0.08, -0.06);
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.1, 8), accentMat);
+  barrel.rotation.z = Math.PI / 2;
+  barrel.position.set(0, 0.08, -0.26);
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.05, 0.2), accentMat);
+  frame.position.set(0, 0.02, -0.02);
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.19, 0.09), mat);
+  grip.position.set(0, -0.09, 0.08);
+  grip.rotation.x = 0.28;
+  const triggerGuard = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.008, 6, 10, Math.PI), accentMat);
+  triggerGuard.position.set(0, -0.02, -0.02);
+  triggerGuard.rotation.x = Math.PI / 2;
+
+  g.add(slide, barrel, frame, grip, triggerGuard);
   return g;
 }
 
