@@ -743,6 +743,8 @@ function addKillFeed(text) {
 
 // ---------- Başlangıç ekranı ----------
 let selectedTeam = "blue";
+let selectedMode = "normal";
+
 document.getElementById("teamBlueBtn").addEventListener("click", () => {
   selectedTeam = "blue";
   document.getElementById("teamBlueBtn").classList.add("selected");
@@ -755,19 +757,27 @@ document.getElementById("teamRedBtn").addEventListener("click", () => {
 });
 document.getElementById("teamBlueBtn").classList.add("selected");
 
+document.getElementById("modeNormalBtn").addEventListener("click", () => {
+  selectedMode = "normal";
+  document.getElementById("modeNormalBtn").classList.add("selected");
+  document.getElementById("modeBotsBtn").classList.remove("selected");
+});
+document.getElementById("modeBotsBtn").addEventListener("click", () => {
+  selectedMode = "bots";
+  document.getElementById("modeBotsBtn").classList.add("selected");
+  document.getElementById("modeNormalBtn").classList.remove("selected");
+});
+document.getElementById("modeNormalBtn").classList.add("selected");
+
 document.getElementById("playBtn").addEventListener("click", () => {
   const myName = document.getElementById("nameInput").value.trim() || "Oyuncu";
   document.getElementById("startScreen").style.display = "none";
   gameStarted = true;
   connect();
   setTimeout(() => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "join", name: myName, team: selectedTeam }));
-    } else {
-      ws.addEventListener("open", () => {
-        ws.send(JSON.stringify({ type: "join", name: myName, team: selectedTeam }));
-      });
-    }
+    const sendJoin = () => ws.send(JSON.stringify({ type: "join", name: myName, team: selectedTeam, mode: selectedMode }));
+    if (ws.readyState === WebSocket.OPEN) sendJoin();
+    else ws.addEventListener("open", sendJoin);
   }, 100);
   if (!isMobile) renderer.domElement.requestPointerLock();
 });
