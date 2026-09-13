@@ -129,16 +129,12 @@ const JOY_RADIUS = 55;
 joystickZone.addEventListener("pointerdown", (e) => {
   joyPointerId = e.pointerId;
   joystickZone.setPointerCapture(e.pointerId);
-  joystickBase.style.display = "block";
-  joystickBase.style.left = `${e.clientX - 55}px`;
-  joystickBase.style.top = `${e.clientY - 55}px`;
-  joystickBase.dataset.cx = e.clientX;
-  joystickBase.dataset.cy = e.clientY;
 });
 joystickZone.addEventListener("pointermove", (e) => {
   if (e.pointerId !== joyPointerId) return;
-  const cx = parseFloat(joystickBase.dataset.cx);
-  const cy = parseFloat(joystickBase.dataset.cy);
+  const rect = joystickBase.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
   let dx = e.clientX - cx;
   let dy = e.clientY - cy;
   const dist = Math.min(Math.hypot(dx, dy), JOY_RADIUS);
@@ -154,7 +150,6 @@ function endJoystick(e) {
   if (e.pointerId !== joyPointerId) return;
   joyPointerId = null;
   joyVec = { x: 0, y: 0 };
-  joystickBase.style.display = "none";
   joystickKnob.style.left = "30px";
   joystickKnob.style.top = "30px";
 }
@@ -187,10 +182,11 @@ const GRAVITY = -18;
 const WEAPONS = {
   knife: { name: "Bıçak", icon: "🔪", damage: 75, magSize: null, fireDelay: 0.5, range: 3, auto: false, reloadTime: 0 },
   pistol: { name: "Tabanca", icon: "🔫", damage: 20, magSize: 12, fireDelay: 0.28, range: 200, auto: false, reloadTime: 1.2 },
-  rifle: { name: "Ağır Tüfek", icon: "💥", damage: 16, magSize: 30, fireDelay: 0.11, range: 200, auto: true, reloadTime: 2.0 },
+  m4: { name: "M4", icon: "🎯", damage: 18, magSize: 30, fireDelay: 0.1, range: 220, auto: true, reloadTime: 2.0 },
+  ak47: { name: "AK47", icon: "🪖", damage: 22, magSize: 30, fireDelay: 0.13, range: 220, auto: true, reloadTime: 2.2 },
 };
 let currentWeapon = "pistol";
-let ammo = { pistol: WEAPONS.pistol.magSize, rifle: WEAPONS.rifle.magSize };
+let ammo = { pistol: WEAPONS.pistol.magSize, m4: WEAPONS.m4.magSize, ak47: WEAPONS.ak47.magSize };
 let reloading = false;
 let lastShotTime = 0;
 
@@ -198,6 +194,7 @@ function updateAmmoHUD() {
   const w = WEAPONS[currentWeapon];
   const ammoEl = document.getElementById("ammo");
   ammoEl.textContent = w.magSize === null ? `${w.icon} —` : `${w.icon} ${ammo[currentWeapon]}/${w.magSize}`;
+  document.getElementById("currentWeaponLabel").textContent = w.name;
 }
 
 // ---------- Birinci şahıs silah modeli ----------
@@ -235,14 +232,11 @@ function buildPistol() {
   return g;
 }
 
-// Takıma göre görünüm: mavi -> M4 tarzı (gri/haki, düz gövde), kırmızı -> AK47 tarzı (kahverengi/ahşap, eğik şarjör)
-function buildRifle(team) {
+// M4: gri/haki, düz gövde. AK47: kahverengi/ahşap, eğik şarjör. İkisi de herkese açık, takımdan bağımsız.
+function buildM4() {
   const g = new THREE.Group();
-  const isBlue = team === "blue";
-  const bodyColor = isBlue ? 0x6b6f5e : 0x4a3423;
-  const accentColor = isBlue ? 0x3c3f36 : 0x2e1f14;
-  const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.6 });
-  const accentMat = new THREE.MeshStandardMaterial({ color: accentColor, roughness: 0.6 });
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x6b6f5e, roughness: 0.6 });
+  const accentMat = new THREE.MeshStandardMaterial({ color: 0x3c3f36, roughness: 0.6 });
 
   const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.11, 0.55), bodyMat);
   receiver.position.set(0, 0.02, -0.05);
@@ -255,12 +249,11 @@ function buildRifle(team) {
 
   const stock = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.09, 0.3), accentMat);
   stock.position.set(0, 0, 0.32);
-  if (!isBlue) stock.rotation.x = -0.08; // AK tarzı hafif eğim
   g.add(stock);
 
   const mag = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.28, 0.09), accentMat);
   mag.position.set(0, -0.16, -0.05);
-  mag.rotation.x = isBlue ? 0.1 : 0.35; // AK'nin eğik şarjörü
+  mag.rotation.x = 0.1;
   g.add(mag);
 
   const grip = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.16, 0.07), accentMat);
@@ -271,13 +264,46 @@ function buildRifle(team) {
   return g;
 }
 
-function rebuildWeaponModels(team) {
+function buildAK47() {
+  const g = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x4a3423, roughness: 0.6 });
+  const accentMat = new THREE.MeshStandardMaterial({ color: 0x2e1f14, roughness: 0.6 });
+
+  const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.11, 0.55), bodyMat);
+  receiver.position.set(0, 0.02, -0.05);
+  g.add(receiver);
+
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.35, 8), accentMat);
+  barrel.rotation.z = Math.PI / 2;
+  barrel.position.set(0, 0.02, -0.5);
+  g.add(barrel);
+
+  const stock = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.09, 0.3), accentMat);
+  stock.position.set(0, 0, 0.32);
+  stock.rotation.x = -0.08; // AK tarzı hafif eğim
+  g.add(stock);
+
+  const mag = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.3, 0.09), accentMat);
+  mag.position.set(0, -0.17, -0.03);
+  mag.rotation.x = 0.4; // AK'nin karakteristik eğik şarjörü
+  g.add(mag);
+
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.16, 0.07), accentMat);
+  grip.position.set(0, -0.12, 0.12);
+  grip.rotation.x = 0.3;
+  g.add(grip);
+
+  return g;
+}
+
+function rebuildWeaponModels() {
   for (const key of Object.keys(weaponModels)) {
     weaponRig.remove(weaponModels[key]);
   }
   weaponModels.knife = buildKnife();
   weaponModels.pistol = buildPistol();
-  weaponModels.rifle = buildRifle(team);
+  weaponModels.m4 = buildM4();
+  weaponModels.ak47 = buildAK47();
 
   for (const key of Object.keys(weaponModels)) {
     const m = weaponModels[key];
@@ -286,7 +312,7 @@ function rebuildWeaponModels(team) {
     weaponRig.add(m);
   }
 }
-rebuildWeaponModels("blue");
+rebuildWeaponModels();
 
 function setActiveWeaponModel(name) {
   for (const key of Object.keys(weaponModels)) {
@@ -373,22 +399,54 @@ function switchWeapon(name) {
   currentWeapon = name;
   setActiveWeaponModel(name);
   updateAmmoHUD();
-  document.querySelectorAll(".weaponBtn").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.weapon === name);
-  });
   ws.send(JSON.stringify({ type: "weapon", weapon: name }));
 }
 
-document.querySelectorAll(".weaponBtn").forEach((btn) => {
-  btn.addEventListener("pointerdown", (e) => {
-    e.preventDefault();
-    switchWeapon(btn.dataset.weapon);
-  });
+// ---------- Basılı tutunca açılan silah seçme menüsü ----------
+// ESKİ 3-buton sistemi tamamen kaldırıldı, yerine tek bir düğmeye basılı
+// tutup üzerinde parmağı/imleci gezdirerek seçim yapılan menü geldi.
+const weaponSelectBtn = document.getElementById("weaponSelectBtn");
+const weaponPopup = document.getElementById("weaponPopup");
+let selectingWeapon = false;
+let hoveredWeapon = null;
+
+function openWeaponPopup() {
+  selectingWeapon = true;
+  weaponPopup.style.display = "flex";
+}
+function closeWeaponPopup(commit) {
+  selectingWeapon = false;
+  weaponPopup.style.display = "none";
+  document.querySelectorAll(".weaponOption").forEach((el) => el.classList.remove("hover"));
+  if (commit && hoveredWeapon) switchWeapon(hoveredWeapon);
+  hoveredWeapon = null;
+}
+
+weaponSelectBtn.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  openWeaponPopup();
+  weaponSelectBtn.setPointerCapture(e.pointerId);
 });
+weaponSelectBtn.addEventListener("pointermove", (e) => {
+  if (!selectingWeapon) return;
+  const el = document.elementFromPoint(e.clientX, e.clientY);
+  document.querySelectorAll(".weaponOption").forEach((o) => o.classList.remove("hover"));
+  const optionEl = el ? el.closest(".weaponOption") : null;
+  if (optionEl) {
+    optionEl.classList.add("hover");
+    hoveredWeapon = optionEl.dataset.weapon;
+  } else {
+    hoveredWeapon = null;
+  }
+});
+weaponSelectBtn.addEventListener("pointerup", () => closeWeaponPopup(true));
+weaponSelectBtn.addEventListener("pointercancel", () => closeWeaponPopup(false));
+
 document.addEventListener("keydown", (e) => {
   if (e.code === "Digit1") switchWeapon("knife");
   if (e.code === "Digit2") switchWeapon("pistol");
-  if (e.code === "Digit3") switchWeapon("rifle");
+  if (e.code === "Digit3") switchWeapon("m4");
+  if (e.code === "Digit4") switchWeapon("ak47");
   if (e.code === "KeyR") reload();
 });
 
@@ -510,7 +568,7 @@ function connect() {
       myId = msg.id;
       myTeam = msg.team;
       player3D.position.set(msg.spawn.x, msg.spawn.y, msg.spawn.z);
-      rebuildWeaponModels(myTeam);
+      // Silah modelleri artık takımdan bağımsız (rebuildWeaponModels() zaten başta çağrıldı)
       setActiveWeaponModel(currentWeapon);
     }
 
