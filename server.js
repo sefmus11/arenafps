@@ -17,7 +17,15 @@ const MAX_HEALTH = 100;
 const WEAPON_DAMAGE = { knife: 75, pistol: 20, m4: 18, ak47: 22 };
 const VALID_WEAPONS = ["knife", "pistol", "m4", "ak47"];
 
-const players = new Map();
+// ================== ODALAR (LOBİLER) ==================
+// "normal": gerçek oyunculara karşı, BOT YOK.
+// "bots": pratik lobisi — içinde en az 1 gerçek oyuncu varken botlar aktif,
+// son gerçek oyuncu da çıkınca botlar temizlenir (lobi "kapanır").
+const rooms = {
+  normal: { players: new Map(), botsActive: false },
+  bots: { players: new Map(), botsActive: false },
+};
+
 let nextId = 1;
 
 function randomSpawn() {
@@ -27,30 +35,32 @@ function randomSpawn() {
     z: (Math.random() * 2 - 1) * (MAP_SIZE / 2 - 4),
   };
 }
-
 function randomTeam() {
   return Math.random() < 0.5 ? "blue" : "red";
 }
-
-function broadcast(obj) {
+function roomHumanCount(room) {
+  let c = 0;
+  for (const [, p] of room.players) if (!p.isBot) c++;
+  return c;
+}
+function broadcastRoom(room, obj) {
   const data = JSON.stringify(obj);
-  for (const [, p] of players) {
+  for (const [, p] of room.players) {
     if (p.ws && p.ws.readyState === p.ws.OPEN) p.ws.send(data);
   }
 }
 
-// Hasar uygulama mantığı ortaklaştırıldı: hem gerçek oyuncular hem de
-// botlar aynı fonksiyonu kullanıyor.
-function applyDamage(shooterId, targetId, weapon) {
-  const shooter = players.get(shooterId);
-  const target = players.get(targetId);
+// Hasar uygulama mantığı ortaklaştırıldı: hem gerçek oyuncular hem botlar kullanır.
+function applyDamage(room, shooterId, targetId, weapon) {
+  const shooter = room.players.get(shooterId);
+  const target = room.players.get(targetId);
   if (!shooter || !target || !target.alive || shooterId === targetId) return;
   if (target.team === shooter.team) return; // dostluk ateşi yok
 
   const damage = WEAPON_DAMAGE[weapon] || WEAPON_DAMAGE.pistol;
   target.health -= damage;
 
-  broadcast({
+  broadcastRoom(room, {
     type: "hit",
     targetId,
     shooterId,
@@ -62,7 +72,7 @@ function applyDamage(shooterId, targetId, weapon) {
     target.alive = false;
     target.deaths++;
     shooter.kills++;
-    broadcast({
+    broadcastRoom(room, {
       type: "death",
       id: targetId,
       killerId: shooterId,
@@ -72,11 +82,11 @@ function applyDamage(shooterId, targetId, weapon) {
     });
 
     setTimeout(() => {
-      if (!players.has(targetId)) return;
+      if (!room.players.has(targetId)) return; // lobi kapanmış/oyuncu ayrılmış olabilir
       target.health = MAX_HEALTH;
       target.alive = true;
       target.position = randomSpawn();
-      broadcast({ type: "respawn", id: targetId, position: target.position });
+      broadcastRoom(room, { type: "respawn", id: targetId, position: target.position });
     }, RESPAWN_MS);
   }
 }
@@ -89,11 +99,11 @@ const BOT_MOVE_SPEED = 4;
 const BOT_DETECT_RANGE = 26;
 const BOT_SHOOT_RANGE = 20;
 const BOT_TICK_MS = 150;
-const BOT_ACCURACY = 0.65; // botlar mükemmel nişancı olmasın
+const BOT_ACCURACY = 0.65;
 
-function spawnBot(team) {
+function spawnBot(room, team) {
   const id = `bot${nextId++}`;
-  players.set(id, {
+  room.players.set(id, {
     ws: null,
     isBot: true,
     name: `${BOT_NAMES[Math.floor(Math.random() * BOT_NAMES.length)]} 🤖`,
@@ -109,23 +119,41 @@ function spawnBot(team) {
     lastShotTime: 0,
   });
 }
-for (let i = 0; i < BOT_COUNT; i++) spawnBot(i % 2 === 0 ? "blue" : "red");
+
+// Bots lobisini, içinde gerçek oyuncu olup olmamasına göre açar/kapatır.
+function syncBotsLobby() {
+  const room = rooms.bots;
+  const humans = roomHumanCount(room);
+
+  if (humans > 0 && !room.botsActive) {
+    room.botsActive = true;
+    for (let i = 0; i < BOT_COUNT; i++) spawnBot(room, i % 2 === 0 ? "blue" : "red");
+  } else if (humans === 0 && room.botsActive) {
+    // Lobi kapanıyor: botları tamamen sil, sıfırdan başlasın.
+    for (const [id, p] of room.players) {
+      if (p.isBot) room.players.delete(id);
+    }
+    room.botsActive = false;
+  }
+}
 
 function dist2D(a, b) {
   return Math.hypot(a.x - b.x, a.z - b.z);
 }
 
 setInterval(() => {
+  const room = rooms.bots;
+  if (!room.botsActive) return; // kimse yoksa botlar hiç işlem yapmaz
   const now = Date.now();
   const limit = MAP_SIZE / 2 - 1;
 
-  for (const [id, bot] of players) {
+  for (const [id, bot] of room.players) {
     if (!bot.isBot || !bot.alive) continue;
 
     let nearestId = null;
     let nearestData = null;
     let nearestDist = Infinity;
-    for (const [oid, other] of players) {
+    for (const [oid, other] of room.players) {
       if (oid === id || !other.alive || other.team === bot.team) continue;
       const d = dist2D(bot.position, other.position);
       if (d < nearestDist) {
@@ -144,7 +172,7 @@ setInterval(() => {
         const delay = BOT_WEAPON_DELAY[bot.weapon] || 500;
         if (now - bot.lastShotTime > delay) {
           bot.lastShotTime = now;
-          if (Math.random() < BOT_ACCURACY) applyDamage(id, nearestId, bot.weapon);
+          if (Math.random() < BOT_ACCURACY) applyDamage(room, id, nearestId, bot.weapon);
         }
       } else {
         const step = BOT_MOVE_SPEED * (BOT_TICK_MS / 1000);
@@ -174,21 +202,8 @@ setInterval(() => {
 // ================== BAĞLANTI YÖNETİMİ ==================
 wss.on("connection", (ws) => {
   const id = String(nextId++);
-  const player = {
-    ws,
-    name: `Oyuncu${id}`,
-    team: randomTeam(),
-    position: randomSpawn(),
-    rotationY: 0,
-    health: MAX_HEALTH,
-    kills: 0,
-    deaths: 0,
-    alive: true,
-    weapon: "pistol",
-  };
-  players.set(id, player);
-
-  ws.send(JSON.stringify({ type: "welcome", id, spawn: player.position, team: player.team }));
+  let player = null;
+  let room = null;
 
   ws.on("message", (raw) => {
     let msg;
@@ -199,10 +214,30 @@ wss.on("connection", (ws) => {
     }
 
     if (msg.type === "join") {
-      player.name = String(msg.name || player.name).slice(0, 16) || player.name;
-      if (msg.team === "blue" || msg.team === "red") player.team = msg.team;
-      broadcast({ type: "playerJoined", id, name: player.name, team: player.team });
+      const mode = msg.mode === "bots" ? "bots" : "normal";
+      room = rooms[mode];
+
+      player = {
+        ws,
+        name: String(msg.name || `Oyuncu${id}`).slice(0, 16) || `Oyuncu${id}`,
+        team: msg.team === "blue" || msg.team === "red" ? msg.team : randomTeam(),
+        position: randomSpawn(),
+        rotationY: 0,
+        health: MAX_HEALTH,
+        kills: 0,
+        deaths: 0,
+        alive: true,
+        weapon: "pistol",
+      };
+      room.players.set(id, player);
+      syncBotsLobby();
+
+      ws.send(JSON.stringify({ type: "welcome", id, spawn: player.position, team: player.team }));
+      broadcastRoom(room, { type: "playerJoined", id, name: player.name, team: player.team });
+      return;
     }
+
+    if (!player || !room) return; // henüz join olmamış
 
     if (msg.type === "move" && player.alive) {
       const pos = msg.position;
@@ -218,32 +253,39 @@ wss.on("connection", (ws) => {
 
     if (msg.type === "shoot" && player.alive) {
       const weapon = VALID_WEAPONS.includes(msg.weapon) ? msg.weapon : "pistol";
-      applyDamage(id, msg.targetId, weapon);
+      applyDamage(room, id, msg.targetId, weapon);
     }
   });
 
   ws.on("close", () => {
-    players.delete(id);
-    broadcast({ type: "playerLeft", id });
+    if (room) {
+      room.players.delete(id);
+      broadcastRoom(room, { type: "playerLeft", id });
+      syncBotsLobby();
+    }
   });
 });
 
 setInterval(() => {
-  const state = {};
-  for (const [id, p] of players) {
-    state[id] = {
-      name: p.name,
-      team: p.team,
-      position: p.position,
-      rotationY: p.rotationY,
-      health: p.health,
-      alive: p.alive,
-      kills: p.kills,
-      deaths: p.deaths,
-      weapon: p.weapon,
-    };
+  for (const roomName of Object.keys(rooms)) {
+    const room = rooms[roomName];
+    if (room.players.size === 0) continue;
+    const state = {};
+    for (const [id, p] of room.players) {
+      state[id] = {
+        name: p.name,
+        team: p.team,
+        position: p.position,
+        rotationY: p.rotationY,
+        health: p.health,
+        alive: p.alive,
+        kills: p.kills,
+        deaths: p.deaths,
+        weapon: p.weapon,
+      };
+    }
+    broadcastRoom(room, { type: "state", players: state });
   }
-  broadcast({ type: "state", players: state });
 }, 1000 / TICK_RATE);
 
 const PORT = process.env.PORT || 3000;
